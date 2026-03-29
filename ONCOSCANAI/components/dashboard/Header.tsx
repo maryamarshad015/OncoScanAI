@@ -12,6 +12,7 @@ const Header: React.FC = () => {
 
         const overrides: Record<string, string> = {
             'vision-workbench': 'HistoAnalysis',
+            'histo-analysis': 'HistoAnalysis',
         };
 
         if (overrides[path]) return overrides[path];

@@ -12,7 +12,7 @@ def preprocess_medical_image(image_bytes: bytes, target_size=(224, 224), model_t
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
-        if model_type.lower() == 'yolo':
+        if model_type.lower() in ('yolo', 'yolov11'):
             # YOLO models expect [0,1] range without ImageNet normalization
             preprocess = transforms.Compose([
                 transforms.Resize(target_size),

@@ -29,6 +29,7 @@ export interface UploadedFile {
   prediction?: {
     result: 'Benign' | 'Malignant' | 'Normal' | 'Inconclusive';
     confidence: number;
+    insight?: string;
   };
   suggestiveReport?: string;
   reportStatus?: 'Idle' | 'Generating' | 'Complete' | 'Failed';

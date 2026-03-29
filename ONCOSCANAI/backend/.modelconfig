@@ -1,11 +1,18 @@
 {
   "models": {
     "alexnet": {
-      "file": "alexnet_backend.pth",
+      "file": "alexnet.pth",
       "type": "custom_format",
       "num_classes": 2,
       "active": true,
       "engine_key": "alexnet"
+    },
+    "efficient_net": {
+      "file": "efficient_net.pth",
+      "type": "efficientnet_b0",
+      "num_classes": 2,
+      "active": true,
+      "engine_key": "efficient_net"
     },
     "best_model": {
       "file": "best_model.pth",
@@ -14,15 +21,15 @@
       "active": true,
       "engine_key": "best_model"
     },
-    "yolo": {
+    "yolov11": {
       "file": "yolov11.pth",
       "type": "ultralytics",
-      "active": false,
-      "engine_key": "yolo"
+      "active": true,
+      "engine_key": "yolov11"
     }
   },
-  "last_loaded": "2026-03-28T20:40:40.431163",
+  "last_loaded": "2026-03-29T18:48:09.287240",
   "persistence": "enabled",
-  "active_count": 3,
+  "active_count": 5,
   "models_loaded": true
 }

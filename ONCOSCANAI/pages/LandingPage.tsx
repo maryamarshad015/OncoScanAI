@@ -85,7 +85,7 @@ const LandingPage: React.FC = () => {
                 {
                   title: 'Uni HistoAnalysis',
                   description: 'Focused on single-class histopathology detection.',
-                  to: '/dashboard/vision-workbench',
+                  to: '/dashboard/histo-analysis',
                   icon: (
                     <svg className="w-6 h-6 text-brand-pink" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3h6l2 4h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2l2-4z" />
@@ -96,7 +96,7 @@ const LandingPage: React.FC = () => {
                 {
                   title: 'MultiClass HistoAnalysis',
                   description: 'Advanced multi-class tissue classification.',
-                  to: '/dashboard/vision-workbench',
+                  to: '/dashboard/histo-analysis',
                   icon: (
                     <svg className="w-6 h-6 text-brand-pink" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <circle cx="7" cy="7" r="3" strokeWidth="2" />

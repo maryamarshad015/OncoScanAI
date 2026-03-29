@@ -12,7 +12,7 @@ const UltrasoundIcon: React.FC<{ className?: string }> = ({ className }) => (
 const navItems = [
   { path: '/dashboard', label: 'Overview', icon: DashboardIcon, exact: true },
   { path: '/dashboard/patient-data', label: 'Patient Records', icon: PatientDataIcon },
-  { path: '/dashboard/vision-workbench', label: 'Histo Analysis', icon: VisionIcon },
+  { path: '/dashboard/histo-analysis', label: 'Histo Analysis', icon: VisionIcon },
   { path: '/dashboard/ultrasound-analysis', label: 'Ultrasound Analysis', icon: UltrasoundIcon },
   { path: '/dashboard/settings', label: 'System Settings', icon: SettingsIcon },
 ];

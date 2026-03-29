@@ -2,12 +2,16 @@
   "engines_loaded": [
     "alexnet",
     "best_seg",
-    "best_model"
+    "best_model",
+    "efficient_net",
+    "yolov11"
   ],
-  "timestamp": "2026-03-28T20:40:40.441210",
+  "timestamp": "2026-03-29T18:48:09.289197",
   "model_files": [
-    "alexnet_backend.pth",
+    "alexnet.pth",
     "best.pt",
-    "best_model.pth"
+    "best_model.pth",
+    "efficient_net.pth",
+    "yolov11.pth"
   ]
 }

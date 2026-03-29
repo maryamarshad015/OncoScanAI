@@ -184,6 +184,7 @@ def infer_num_classes_from_state_dict(state_dict):
         return None
 
     preferred_keys = (
+        "classifier.6.weight",
         "classifier.1.weight",
         "classifier.weight",
         "fc.weight",
@@ -279,7 +280,7 @@ print(f"[INIT] Workspace root: {BASE_DIR}")
 
 def load_clinical_models():
     """
-    Scans the models folder for alexnet.pth and yolov11.pth.
+    Scans the models folder for the histology and ultrasound weights.
     Loads them into memory as operational inference engines.
     Models persist and are reloaded on each startup.
     """
@@ -290,8 +291,6 @@ def load_clinical_models():
         print(f"[INIT] Created models directory at {MODELS_DIR}. Please place your .pth files here.")
         return
 
-    # Specific targets requested: alexnet, yolov11, and best_model
-    targets = ['alexnet', 'yolo', 'yolov11', 'best_model']
     files = [f for f in os.listdir(MODELS_DIR) if f.endswith(('.pth', '.pt', '.h5'))]
     
     if not files:
@@ -305,13 +304,17 @@ def load_clinical_models():
     
     for f in files:
         filename_base = os.path.splitext(f)[0].lower()
-        # Map filenames to the expected frontend keys ('alexnet', 'yolo', 'breast_ai_combined')
+        # Map filenames to the expected frontend/API keys.
         if filename_base in ('best_seg', 'best_cls'):
             engine_key = filename_base
         elif filename_base == 'best':
             engine_key = 'best'  # resolve after YOLO task is known
+        elif filename_base == 'best_model':
+            engine_key = 'best_model'
+        elif filename_base in ('efficient_net', 'efficientnet'):
+            engine_key = 'efficient_net'
         elif 'yolo' in filename_base:
-            engine_key = 'yolo'
+            engine_key = 'yolov11'
         elif 'alex' in filename_base:
             engine_key = 'alexnet'
         elif 'oncoscan_combined' in filename_base:
@@ -346,7 +349,7 @@ def load_clinical_models():
                 print(f"[OK] {engine_key.upper()} - Keras model loaded from {f}")
             else:
                 # Prefer Ultralytics YOLO loader for YOLO segmentation/classification files
-                if engine_key in ('yolo', 'best', 'best_seg', 'best_cls') or 'yolo' in filename_base:
+                if engine_key in ('yolov11', 'best', 'best_seg', 'best_cls') or 'yolo' in filename_base:
                     try:
                         from ultralytics import YOLO
                         if yolo_path is None:
@@ -361,8 +364,6 @@ def load_clinical_models():
                                     resolved_key = 'best_cls'
                                 elif task == 'segment':
                                     resolved_key = 'best_seg'
-                            elif task == 'classify' and engine_key == 'yolo':
-                                resolved_key = 'yolo_cls'
 
                             if resolved_key in engines:
                                 print(f"[INFO] Skipping {f} because '{resolved_key}' is already loaded")
@@ -391,28 +392,33 @@ def load_clinical_models():
                     print(f"[DEBUG] Detected YOLO model via predict method in {f}")
                     engines[engine_key] = loaded
                     print(f"[OK] {engine_key.upper()} - YOLO model loaded from {f}")
-                # Handle state dicts (AlexNet and best_model)
+                # Handle state dicts (AlexNet and EfficientNet-style classifiers)
                 elif isinstance(loaded, dict):
                     if 'alexnet' in engine_key:
                         try:
                             # Check if it's custom format with 'architecture', 'num_classes', 'state_dict'
                             if 'architecture' in loaded and 'num_classes' in loaded and 'state_dict' in loaded:
-                                num_classes = loaded['num_classes']
-                                model = models.alexnet(pretrained=False, num_classes=num_classes)
+                                num_classes = int(loaded['num_classes'])
+                                model = models.alexnet(weights=None, num_classes=num_classes)
                                 model.load_state_dict(loaded['state_dict'])
                                 model.eval()
                                 engines[engine_key] = model
                                 print(f"[OK] {engine_key.upper()} - Custom format, {num_classes} classes, from {f}")
                             else:
-                                # Standard state dict
-                                model = models.alexnet(pretrained=False)
-                                model.load_state_dict(loaded)
+                                # Standard state dict. Infer the classifier width from the saved head.
+                                state_dict = extract_state_dict(loaded)
+                                num_classes = infer_num_classes_from_state_dict(state_dict)
+                                if num_classes is None:
+                                    num_classes = 2
+
+                                model = models.alexnet(weights=None, num_classes=int(num_classes))
+                                model.load_state_dict(state_dict)
                                 model.eval()
                                 engines[engine_key] = model
-                                print(f"[OK] {engine_key.upper()} - State dict reconstructed from {f}")
+                                print(f"[OK] {engine_key.upper()} - State dict reconstructed from {f} with num_classes={num_classes}")
                         except RuntimeError as re:
                             print(f"[ERROR] {engine_key.upper()} - Architecture mismatch: {str(re)[:60]}")
-                    elif 'best_model' in engine_key:
+                    elif engine_key in ('best_model', 'efficient_net'):
                         try:
                             state_dict = extract_state_dict(loaded)
                             num_classes = None
@@ -435,7 +441,7 @@ def load_clinical_models():
                             model_loaded = False
                             for name, model_fn in efficientnet_models:
                                 try:
-                                    model = model_fn(pretrained=False, num_classes=int(num_classes))
+                                    model = model_fn(weights=None, num_classes=int(num_classes))
                                     missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
                                     if len(missing_keys) < 50:  # Allow reasonable missing keys
                                         model.eval()
@@ -443,12 +449,12 @@ def load_clinical_models():
                                         print(f"[OK] {engine_key.upper()} - {name.upper()} loaded (partial) from {f}, missing: {len(missing_keys)}, unexpected: {len(unexpected_keys)}")
                                         model_loaded = True
                                         break
-                                except Exception as e:
+                                except Exception:
                                     continue
 
                             if not model_loaded:
                                 # Try ResNet50 as fallback
-                                model = models.resnet50(pretrained=False, num_classes=int(num_classes))
+                                model = models.resnet50(weights=None, num_classes=int(num_classes))
                                 missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
                                 if len(missing_keys) < 100:
                                     model.eval()
@@ -461,7 +467,7 @@ def load_clinical_models():
 
                         except Exception as e:
                             print(f"[ERROR] {engine_key.upper()} - All loading attempts failed: {str(e)[:100]}")
-                            print(f"[WARN] {engine_key.upper()} - Cannot load best_model, skipping")
+                            print(f"[WARN] {engine_key.upper()} - Cannot load classifier, skipping")
                     else:
                         print(f"[WARN] {engine_key.upper()} - Cannot reconstruct from state dict")
                 elif isinstance(loaded, torch.nn.Module) or hasattr(loaded, 'forward'):
@@ -490,11 +496,18 @@ def update_model_config():
         config = {
             "models": {
                 "alexnet": {
-                    "file": "alexnet_backend.pth",
+                    "file": "alexnet.pth",
                     "type": "custom_format",
                     "num_classes": 2,
                     "active": "alexnet" in engines,
                     "engine_key": "alexnet"
+                },
+                "efficient_net": {
+                    "file": "efficient_net.pth",
+                    "type": "efficientnet_b0",
+                    "num_classes": 2,
+                    "active": "efficient_net" in engines,
+                    "engine_key": "efficient_net"
                 },
                 "best_model": {
                     "file": "best_model.pth",
@@ -503,11 +516,11 @@ def update_model_config():
                     "active": "best_model" in engines,
                     "engine_key": "best_model"
                 },
-                "yolo": {
+                "yolov11": {
                     "file": "yolov11.pth",
                     "type": "ultralytics",
-                    "active": "yolo" in engines,
-                    "engine_key": "yolo"
+                    "active": "yolov11" in engines,
+                    "engine_key": "yolov11"
                 }
             },
             "last_loaded": datetime.now().isoformat(),
@@ -587,7 +600,7 @@ async def startup_event():
         print(f"[CHECK] Model files in {MODELS_DIR}: {pth_files}")
 
         if not pth_files:
-            print(f"[WARN] No model files found! Expected: alexnet_backend.pth, yolov11.pth")
+            print(f"[WARN] No model files found! Expected histology weights such as alexnet.pth, yolov11.pth, and efficient_net.pth")
 
         # Load models with persistence check
         print(f"\n[LOAD] Loading persisted models...")
@@ -624,13 +637,18 @@ async def run_inference(model_name: str, file: UploadFile = File(...)):
     # Ensure models are loaded in case startup event did not run
     ensure_models_loaded()
 
-    target = model_name.lower()
+    histo_aliases = {
+        "yolo": "yolov11",
+        "best_model": "efficient_net",
+    }
+    requested_target = model_name.lower()
+    target = histo_aliases.get(requested_target, requested_target)
     engine = engines.get(target)
 
     if not engine:
         raise HTTPException(
             status_code=404,
-            detail=f"Neural engine '{target}' is not loaded. Ensure '{target}.pth' is in backend/models/"
+            detail=f"Neural engine '{target}' is not loaded. Ensure the matching weight file is present in backend/models/"
         )
 
 
@@ -754,7 +772,7 @@ async def run_inference(model_name: str, file: UploadFile = File(...)):
                 "result": result_label,
                 "confidence": float(confidence),
                 "insight": insights_local.get(result_label.lower(), "Atypical findings detected. Clinical correlation required."),
-                "engine": model_name.upper(),
+                "engine": target.upper(),
                 "timestamp": "Live Neural Inference"
             }
 
@@ -1181,7 +1199,7 @@ async def run_inference(model_name: str, file: UploadFile = File(...)):
             "result": result_label,
             "confidence": float(confidence.item()) if hasattr(confidence, 'item') else float(confidence),
             "insight": insights.get(result_label.lower(), "Atypical findings detected. Clinical correlation required."),
-            "engine": model_name.upper(),
+            "engine": target.upper(),
             "timestamp": "Live Neural Inference"
         }
 
