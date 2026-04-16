@@ -14,6 +14,13 @@ export interface AnalysisResult {
   lesionLocation?: any;
 }
 
+export interface SuggestiveReportData {
+  summary: string;
+  impression: string;
+  recommendedClinicalNextSteps: string[];
+  disclaimer: string;
+}
+
 export interface UploadedFile {
   id: string;
   name: string;
@@ -32,6 +39,7 @@ export interface UploadedFile {
     insight?: string;
   };
   suggestiveReport?: string;
+  suggestiveReportData?: SuggestiveReportData;
   reportStatus?: 'Idle' | 'Generating' | 'Complete' | 'Failed';
   reportError?: string;
 }

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import type { AnalysisResult, UploadedFile } from '../types';
+import type { AnalysisResult, SuggestiveReportData, UploadedFile } from '../types';
 import { UploadIcon, ModelIcon, LiveIcon, VisionIcon, InfoIcon } from '../components/icons';
 // --- Helper Functions ---
 
@@ -22,10 +22,21 @@ type CombinedInferenceResponse = {
 };
 
 type WorkerReportResponse = {
-  report?: string;
+  report?: SuggestiveReportData | null;
+  reportText?: string;
 };
 
+type ReportCategory = 'Normal Tissue' | 'Benign' | 'Malignant';
+
 const REPORT_WORKER_URL = 'http://127.0.0.1:8787/report';
+const REPORT_CATEGORIES: ReportCategory[] = ['Normal Tissue', 'Benign', 'Malignant'];
+const REPORT_DOCUMENT_FONT_STACK = '"Times New Roman", Times, serif';
+const REPORT_PATHOLOGY_LABELS: Record<AnalysisResult['pathology'], string> = {
+  Normal: 'Normal Tissue',
+  Benign: 'Benign',
+  Malignant: 'Malignant',
+  Inconclusive: 'Inconclusive',
+};
 
 function formatBytes(bytes: number, decimals = 2) {
   if (bytes === 0) return '0 Bytes';
@@ -81,6 +92,186 @@ const normalizeReportText = (report?: string) =>
     .replace(/\*\*/g, '')
     .replace(/mmÂ²/g, 'mm^2')
     .trim();
+
+const normalizeAreaUnitText = (value?: string) =>
+  (value || '').replace(/mm\^2|mmÂ²|mmÃ‚Â²/g, 'mm\u00B2');
+
+const normalizeReportData = (report?: SuggestiveReportData | null): SuggestiveReportData | undefined => {
+  if (!report) return undefined;
+
+  const summary = (report.summary || '').trim();
+  const impression = (report.impression || '').trim();
+  const recommendedClinicalNextSteps = Array.isArray(report.recommendedClinicalNextSteps)
+    ? report.recommendedClinicalNextSteps.map(step => step.trim()).filter(Boolean)
+    : [];
+  const disclaimer = (report.disclaimer || '').trim();
+
+  if (!summary && !impression && recommendedClinicalNextSteps.length === 0 && !disclaimer) {
+    return undefined;
+  }
+
+  return {
+    summary: summary || 'Not provided',
+    impression: impression || 'Not provided',
+    recommendedClinicalNextSteps: recommendedClinicalNextSteps.length > 0 ? recommendedClinicalNextSteps : ['Not provided'],
+    disclaimer: disclaimer || 'Not provided',
+  };
+};
+
+const formatConfidence = (confidence?: number) =>
+  typeof confidence === 'number' && Number.isFinite(confidence) ? `${(confidence * 100).toFixed(1)}%` : 'Not provided';
+
+const formatArea = (area?: number) =>
+  typeof area === 'number' && Number.isFinite(area) ? `${area.toFixed(2)} mm\u00B2` : 'Not provided';
+
+const formatOptionalValue = (value?: string | number | null) => {
+  if (value === null || value === undefined) return 'Not provided';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'Not provided';
+  return value.trim() || 'Not provided';
+};
+
+const formatReportTimestamp = (date = new Date()) =>
+  new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })
+    .format(date)
+    .replace(',', '')
+    .toLowerCase();
+
+const getReportCategory = (pathology: AnalysisResult['pathology']): ReportCategory | null => {
+  switch (pathology) {
+    case 'Normal':
+      return 'Normal Tissue';
+    case 'Benign':
+      return 'Benign';
+    case 'Malignant':
+      return 'Malignant';
+    default:
+      return null;
+  }
+};
+
+const ReportDocumentRow: React.FC<{
+  label: string;
+  bordered?: boolean;
+  children: React.ReactNode;
+}> = ({ label, bordered = true, children }) => (
+  <div className={`grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:gap-6 ${bordered ? 'border-t border-[#e7e7e7] pt-5' : ''}`}>
+    <p className="text-[14px] font-semibold leading-7 text-[#464646]">{label}</p>
+    <div className="min-w-0 text-[12px] leading-[1.9] text-[#464646]">
+      {children}
+    </div>
+  </div>
+);
+
+const SuggestiveReportCard: React.FC<{
+  analysis: AnalysisResult;
+  fileName: string;
+  report: SuggestiveReportData;
+}> = ({ analysis, fileName, report }) => {
+  const selectedCategory = getReportCategory(analysis.pathology);
+  const pathologyLabel = REPORT_PATHOLOGY_LABELS[analysis.pathology];
+  const reportTimestamp = formatReportTimestamp();
+  const quantitativeFindings = [
+    { label: 'Classification', value: pathologyLabel },
+    { label: 'AI Confidence', value: formatConfidence(analysis.confidence) },
+    { label: 'Pixel Count', value: formatOptionalValue(analysis.pixels) },
+    { label: 'Area (mm\u00B2)', value: formatArea(analysis.area) },
+  ];
+
+  return (
+    <div className="mt-4 rounded-sm border border-[#ddd8cf] bg-[#f4f1ec] p-3 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+      <div
+        className="mx-auto border border-[#cfcfcf] bg-white px-5 py-6 sm:px-8 sm:py-8"
+        style={{ fontFamily: REPORT_DOCUMENT_FONT_STACK }}
+      >
+        <div className="relative flex items-center justify-center">
+          <div className="absolute left-0 right-0 top-1/2 h-px bg-[#cfcfcf]"></div>
+          <h3 className="relative bg-white px-4 text-center text-[14px] font-semibold tracking-[0.08em] text-[#464646] uppercase">
+            Analysis Report
+          </h3>
+        </div>
+
+        <div className="mt-4 border-t border-[#cfcfcf] pt-3 text-[12px] leading-6 text-[#464646]">
+          <div className="flex flex-wrap gap-x-5 gap-y-1">
+            <span><span className="font-semibold">File Reference:</span> {fileName}</span>
+            <span><span className="font-semibold">Classification:</span> {pathologyLabel}</span>
+            <span><span className="font-semibold">AI Confidence:</span> {formatConfidence(analysis.confidence)}</span>
+            <span><span className="font-semibold">Analysis Time:</span> {reportTimestamp}</span>
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-5">
+          <ReportDocumentRow label="Classification:" bordered={false}>
+            <div className="overflow-hidden rounded-[4px] border border-[#d8d8d8] bg-[#f6f6f6]">
+              <div className="grid grid-cols-3">
+                {REPORT_CATEGORIES.map((category, index) => {
+                  const isSelected = category === selectedCategory;
+                  return (
+                    <div
+                      key={category}
+                      className={`flex min-h-[42px] items-center justify-center px-2 py-3 text-center text-[12px] font-semibold tracking-[0.02em] ${index < REPORT_CATEGORIES.length - 1 ? 'border-r border-[#d8d8d8]' : ''} ${isSelected ? 'bg-white text-[#2f2f2f] shadow-[inset_0_5px_0_0_#33A1C9]' : 'bg-[#f6f6f6] text-[#868686]'}`}
+                    >
+                      <span>{category}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {selectedCategory === null && (
+              <p className="mt-2 text-[12px] italic leading-5 text-[#6f6f6f]">
+                Current AI output is inconclusive, so no class is highlighted in the template strip.
+              </p>
+            )}
+          </ReportDocumentRow>
+
+          <ReportDocumentRow label="Summary:">
+            <p>{report.summary}</p>
+          </ReportDocumentRow>
+
+          <ReportDocumentRow label="Impression:">
+            <p>{report.impression}</p>
+          </ReportDocumentRow>
+
+          <ReportDocumentRow label="AI Insight:">
+            <p>{formatOptionalValue(analysis.insight)}</p>
+          </ReportDocumentRow>
+
+          <ReportDocumentRow label="Quantitative Findings:">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {quantitativeFindings.map(item => (
+                <div key={item.label} className="border-b border-[#ebebeb] pb-2">
+                  <p className="text-[14px] font-semibold tracking-[0.04em] text-[#464646]">{item.label}</p>
+                  <p className="mt-1 text-[12px] leading-7 text-[#464646]">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </ReportDocumentRow>
+
+          <ReportDocumentRow label="Recommended Clinical Next Steps:">
+            <div className="space-y-3">
+              {report.recommendedClinicalNextSteps.map((step, index) => (
+                <div key={`${index}-${step}`} className="flex gap-3">
+                  <span className="pt-0.5 text-[12px] font-semibold text-[#464646]">{index + 1}.</span>
+                  <p className="flex-1">{step}</p>
+                </div>
+              ))}
+            </div>
+          </ReportDocumentRow>
+        </div>
+
+        <div className="mt-8 border-t border-[#cfcfcf] pt-4 text-center text-[12px] leading-6 text-[#666666]">
+          {report.disclaimer}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // --- Main Component ---
 
@@ -148,7 +339,6 @@ const UploadScans: React.FC = () => {
             insight: analysis.insight,
             pixels: analysis.pixels,
             area: analysis.area,
-            modelUsed: analysis.modelUsed,
           },
         }),
       });
@@ -159,16 +349,18 @@ const UploadScans: React.FC = () => {
       }
 
       const json = await res.json() as WorkerReportResponse;
-      const report = normalizeReportText(json.report);
+      const report = normalizeReportData(json.report);
+      const reportText = normalizeAreaUnitText(normalizeReportText(json.reportText));
 
-      if (!report) {
+      if (!report && !reportText) {
         throw new Error('Cloudflare Worker returned an empty report.');
       }
 
       updateUploadedFile(fileObj.id, file => ({
         ...file,
         reportStatus: 'Complete',
-        suggestiveReport: report,
+        suggestiveReport: reportText || undefined,
+        suggestiveReportData: report,
         reportError: undefined,
       }));
     } catch (err) {
@@ -420,12 +612,12 @@ const UploadScans: React.FC = () => {
 
                 <div className="grid grid-cols-3 gap-4">
                   <AnalysisStatCard title="AI CONFIDENCE" value={`${(selectedFile.analysis.confidence * 100).toFixed(1)}%`} />
-                  <AnalysisStatCard title="TUMOUR AREA" value={selectedFile.analysis.area != null ? `${selectedFile.analysis.area.toFixed(2)} mm^2` : 'N/A'} />
+                  <AnalysisStatCard title="TUMOUR AREA" value={selectedFile.analysis.area != null ? `${selectedFile.analysis.area.toFixed(2)} mm\u00B2` : 'N/A'} />
                   <AnalysisStatCard title="TUMOUR PIXELS" value={selectedFile.analysis.pixels != null ? `${selectedFile.analysis.pixels} PX` : 'N/A'} />
                 </div>
 
             <div className="mt-6 bg-blue-50 border-l-4 border-brand-blue text-brand-text-primary p-4 rounded-r-lg">
-                <p className="font-semibold text-sm">Radiologist Insight:</p>
+                <p className="font-semibold text-sm">AI Insight:</p>
                 {/* Fix: Use insight property as defined in AnalysisResult */}
                 <p className="text-sm mt-1">{selectedFile.analysis.insight}</p>
             </div>
@@ -459,15 +651,23 @@ const UploadScans: React.FC = () => {
                   </div>
                 )}
 
-                {selectedFile.suggestiveReport && (
-                  <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                {selectedFile.suggestiveReportData && selectedFile.analysis && (
+                  <SuggestiveReportCard
+                    analysis={selectedFile.analysis}
+                    fileName={selectedFile.name}
+                    report={selectedFile.suggestiveReportData}
+                  />
+                )}
+
+                {!selectedFile.suggestiveReportData && selectedFile.suggestiveReport && (
+                  <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
                     <pre className="whitespace-pre-wrap text-sm leading-6 text-brand-text-primary font-sans">
                       {selectedFile.suggestiveReport}
                     </pre>
                   </div>
                 )}
 
-                {!selectedFile.suggestiveReport && selectedFile.reportStatus === 'Idle' && (
+                {!selectedFile.suggestiveReportData && !selectedFile.suggestiveReport && selectedFile.reportStatus === 'Idle' && (
                   <p className="mt-4 text-sm text-brand-text-secondary">The suggestive report will appear here after the FastAPI analysis completes.</p>
                 )}
             </div>
