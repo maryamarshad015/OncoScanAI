@@ -1,0 +1,18 @@
+{
+  "engines_loaded": [
+    "alexnet",
+    "best_seg",
+    "best_model",
+    "efficient_net",
+    "master",
+    "yolo"
+  ],
+  "timestamp": "2026-04-21T02:47:43.194116",
+  "model_files": [
+    "alexnet.pth",
+    "best.pt",
+    "best_model.pth",
+    "efficient_net.pth",
+    "yolov11.pth"
+  ]
+}

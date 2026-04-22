@@ -1,0 +1,77 @@
+# ==================================================
+# FRONTEND (Node / Vite / React)
+# ==================================================
+
+backend/venv*/
+backend/.pip-temp/
+
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==================================================
+# PYTHON
+# ==================================================
+
+# Virtual environments (never upload)
+venv/
+.venv/
+env/
+backend/venv/
+backend/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+backend/__pycache__/
+
+# ==================================================
+# MODEL WEIGHTS (ignore files, NOT folder)
+# ==================================================
+backend/models/*.h5
+backend/models/*.pt
+backend/models/*.pth
+backend/models/*.ckpt
+backend/models/*.onnx
+
+# ==================================================
+# DATASETS (optional — remove if needed)
+# ==================================================
+data/
+dataset/
+datasets/
+
+# ==================================================
+# LARGE ARCHIVES
+# ==================================================
+*.zip
+*.rar
+*.7z
+
+# ==================================================
+# SYSTEM / EDITOR FILES
+# ==================================================
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==================================================
+# ERROR FILES
+# ==================================================
+*.err
+server.errbackend/venv*/
+backend/.pip-temp/

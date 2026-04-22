@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-brand-background text-brand-text-primary font-sans antialiased;
+}
+
+/* ── Pulsing gradient border for upload drop zone ── */
+@keyframes border-breathe {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1; }
+}
+
+.upload-zone-idle {
+  position: relative;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.upload-zone-idle::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(135deg, #f472b6, #a855f7, #3b82f6, #f472b6);
+  background-size: 300% 300%;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  animation: gradient-spin 4s linear infinite, border-breathe 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes gradient-spin {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ── Dot-grid background pattern ── */
+.dot-grid-bg {
+  background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* ── Gradient separator ── */
+.gradient-separator {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #e2e8f0 20%, #f472b6 50%, #e2e8f0 80%, transparent);
+  border: none;
+}

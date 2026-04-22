@@ -1,0 +1,7 @@
+{
+  "name": "OncoScanAI",
+  "description": "A high-precision AI diagnostic platform for oncology professionals, featuring real-time histopathology analysis using state-of-the-art neural networks.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
