@@ -10,7 +10,7 @@ import LoginPage                from './pages/LoginPage';
 import SignupPage               from './pages/SignupPage';
 import VisionWorkbench          from './pages/VisionWorkbench';
 import UploadScans              from './pages/UploadScans';
-import MultiClassHistoAnalysis  from './pages/MultiClassHistoAnalysis';
+import MultiHistoAnalysis       from './pages/MultiHistoAnalysis';
 import PatientData              from './pages/PatientData';
 import Reports                  from './pages/Reports';
 import Settings                 from './pages/Settings';
@@ -65,7 +65,7 @@ const App: React.FC = () => {
           <Route path="/dashboard/patient-data"       element={<ProtectedRoute><PatientData /></ProtectedRoute>} />
           <Route path="/dashboard/vision-workbench"   element={<ProtectedRoute><VisionWorkbench /></ProtectedRoute>} />
           <Route path="/dashboard/ultrasound-analysis" element={<ProtectedRoute><UploadScans /></ProtectedRoute>} />
-          <Route path="/dashboard/multi-class-histo"  element={<ProtectedRoute><MultiClassHistoAnalysis /></ProtectedRoute>} />
+          <Route path="/dashboard/multi-class-histo"  element={<ProtectedRoute><MultiHistoAnalysis /></ProtectedRoute>} />
           <Route path="/dashboard/reports"            element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/dashboard/settings"           element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
