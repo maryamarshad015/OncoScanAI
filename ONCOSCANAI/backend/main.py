@@ -12,7 +12,6 @@ import numpy as np
 import os
 import json
 import io
-import tempfile
 from typing import Dict
 from datetime import datetime
 from utils import preprocess_medical_image
@@ -275,6 +274,13 @@ MASTER_HISTO_DIAGNOSIS_BY_LABEL = {
     "phyllodes_tumor": "benign",
     "tubular_adenoma": "benign",
 }
+MASTER_HISTO_ENGINE_KEY = "master"
+MASTER_HISTO_MODEL_FILENAMES = (
+    "OncoScanAI-Master-Model.h5",
+    "OncoScanAI_Master_Model.h5",
+)
+MASTER_HISTO_MODEL_FILE_LOOKUP = {name.lower() for name in MASTER_HISTO_MODEL_FILENAMES}
+MASTER_HISTO_MODEL_DISPLAY_NAME = "OncoScanAI Master Model"
 
 def normalize_label(label):
     if label is None:
@@ -360,24 +366,29 @@ def is_three_class_ultrasound_engine(engine):
 
 def preprocess_master_histo_image(content: bytes) -> np.ndarray:
     """
-    Apply the master model preprocessing path exactly as provided:
-    load_img(path, target_size=(224, 224)) -> img_to_array -> expand_dims.
+    Match the master model preprocessing contract:
+    cv2.resize(img, (224, 224)) -> img / 255.0 -> np.expand_dims(img, axis=0)
     """
-    temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
-            temp_file.write(content)
-            temp_path = temp_file.name
+        import cv2
 
-        image = tf.keras.utils.load_img(temp_path, target_size=(224, 224))
-        img_array = tf.keras.utils.img_to_array(image)
+        img_buffer = np.frombuffer(content, dtype=np.uint8)
+        image = cv2.imdecode(img_buffer, cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("Could not decode uploaded histology image")
+
+        image = cv2.resize(image, (224, 224))
+        image = image.astype(np.float32) / 255.0
+        return np.expand_dims(image, axis=0)
+    except ImportError:
+        # Keep a dependency-light fallback with the same resize/normalize/batch semantics.
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(content)).convert("RGB")
+        resample = Image.Resampling.BILINEAR if hasattr(Image, "Resampling") else Image.BILINEAR
+        image = image.resize((224, 224), resample=resample)
+        img_array = np.asarray(image, dtype=np.float32) / 255.0
         return np.expand_dims(img_array, axis=0)
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
 
 
 def to_probability_vector(raw_output) -> np.ndarray:
@@ -426,6 +437,27 @@ def summarize_master_histo_prediction(probabilities: np.ndarray):
     ]))
     return class_id, confidence, result_label, pathology_group, diagnosis_confidence
 
+
+def list_available_model_files():
+    if not os.path.exists(MODELS_DIR):
+        return []
+
+    model_files = [f for f in os.listdir(MODELS_DIR) if f.endswith((".pth", ".pt", ".h5"))]
+    return sorted(
+        model_files,
+        key=lambda name: (
+            0 if os.path.basename(name).lower() in MASTER_HISTO_MODEL_FILE_LOOKUP else 1,
+            name.lower(),
+        ),
+    )
+
+
+def get_master_histo_model_filename():
+    for model_file in list_available_model_files():
+        if os.path.basename(model_file).lower() in MASTER_HISTO_MODEL_FILE_LOOKUP:
+            return model_file
+    return None
+
 def resolve_yolo_task(yolo_model):
     task = getattr(yolo_model, "task", None)
     if task is None:
@@ -468,10 +500,10 @@ def load_clinical_models():
     
     if not os.path.exists(MODELS_DIR):
         os.makedirs(MODELS_DIR)
-        print(f"[INIT] Created models directory at {MODELS_DIR}. Please place your .pth files here.")
+        print(f"[INIT] Created models directory at {MODELS_DIR}. Please place your model files here.")
         return
 
-    files = [f for f in os.listdir(MODELS_DIR) if f.endswith(('.pth', '.pt', '.h5'))]
+    files = list_available_model_files()
     
     if not files:
         print(f"[WARN] No model files found in {MODELS_DIR}")
@@ -510,7 +542,7 @@ def load_clinical_models():
         elif 'oncoscan_combined' in filename_base:
             engine_key = 'breast_ai_combined'  # Map original model to expected frontend key
         elif 'oncoscan' in filename_base or 'master' in filename_base:
-            engine_key = 'master'
+            engine_key = MASTER_HISTO_ENGINE_KEY
         else:
             engine_key = filename_base
 
@@ -537,7 +569,7 @@ def load_clinical_models():
                 print(f"[DEBUG] Loading Keras model {f}...")
                 try:
                     # Try loading without custom objects first
-                    loaded = keras.models.load_model(path)
+                    loaded = keras.models.load_model(path, compile=False)
                     print(f"[DEBUG] Loaded {f} without custom objects, type: {type(loaded).__name__}")
                     engines[engine_key] = loaded
                     print(f"[OK] {engine_key.upper()} - Keras model loaded from {f}")
@@ -551,7 +583,7 @@ def load_clinical_models():
                             'concat_func': concat_func,
                             'Dense': CustomDense,  # Handle quantization_config
                         }
-                        loaded = keras.models.load_model(path, custom_objects=custom_objects)
+                        loaded = keras.models.load_model(path, custom_objects=custom_objects, compile=False)
                         print(f"[DEBUG] Loaded {f} with custom objects, type: {type(loaded).__name__}")
                         engines[engine_key] = loaded
                         print(f"[OK] {engine_key.upper()} - Keras model loaded from {f}")
@@ -712,6 +744,13 @@ def update_model_config():
                     "type": "ultralytics",
                     "active": "yolo" in engines,
                     "engine_key": "yolo"
+                },
+                "master": {
+                    "file": get_master_histo_model_filename() or MASTER_HISTO_MODEL_FILENAMES[1],
+                    "type": "keras_multiclass_histology",
+                    "num_classes": len(MASTER_HISTO_CLASS_LABELS),
+                    "active": MASTER_HISTO_ENGINE_KEY in engines,
+                    "engine_key": MASTER_HISTO_ENGINE_KEY
                 }
             },
             "last_loaded": datetime.now().isoformat(),
@@ -733,7 +772,7 @@ def save_model_state():
         state = {
             "engines_loaded": list(engines.keys()),
             "timestamp": datetime.now().isoformat(),
-            "model_files": [f for f in os.listdir(MODELS_DIR) if f.endswith(('.pth', '.pt'))] if os.path.exists(MODELS_DIR) else []
+            "model_files": list_available_model_files()
         }
         with open(state_file, 'w') as f:
             json.dump(state, f, indent=2)
@@ -772,7 +811,7 @@ def ensure_models_loaded():
 
 def get_histo_model_keys():
     ensure_models_loaded()
-    return [key for key in ("alexnet", "efficient_net", "yolo", "master") if key in engines]
+    return [key for key in ("alexnet", "efficient_net", "yolo", MASTER_HISTO_ENGINE_KEY) if key in engines]
 
 
 def get_ultrasound_model_keys():
@@ -796,12 +835,11 @@ async def startup_event():
 
         # Verify model files exist
         print(f"\n[CHECK] Verifying model files...")
-        files_found = os.listdir(MODELS_DIR) if os.path.exists(MODELS_DIR) else []
-        pth_files = [f for f in files_found if f.endswith(('.pth', '.pt'))]
-        print(f"[CHECK] Model files in {MODELS_DIR}: {pth_files}")
+        model_files = list_available_model_files()
+        print(f"[CHECK] Model files in {MODELS_DIR}: {model_files}")
 
-        if not pth_files:
-            print(f"[WARN] No model files found! Expected: alexnet.pth, yolov11.pth")
+        if not model_files:
+            print(f"[WARN] No model files found! Expected histology and ultrasound model files in {MODELS_DIR}")
 
         # Load models with persistence check
         print(f"\n[LOAD] Loading persisted models...")
@@ -831,6 +869,8 @@ async def get_active_models():
         "active_models": list(engines.keys()),
         "histo_models": get_histo_model_keys(),
         "ultrasound_models": get_ultrasound_model_keys(),
+        "master_model_file": get_master_histo_model_filename(),
+        "master_model_endpoint": "/predict/histo/multi",
     }
 
 def run_inference_from_bytes(model_name: str, content: bytes):
@@ -840,6 +880,15 @@ def run_inference_from_bytes(model_name: str, content: bytes):
     engine = engines.get(target)
 
     if not engine:
+        if target == MASTER_HISTO_ENGINE_KEY:
+            expected_names = ", ".join(MASTER_HISTO_MODEL_FILENAMES)
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Neural engine '{target}' is not loaded. Place {expected_names} in "
+                    f"{MODELS_DIR} and restart FastAPI."
+                )
+            )
         raise HTTPException(
             status_code=404,
             detail=f"Neural engine '{target}' is not loaded. Ensure '{target}.pth' is in backend/models/"
@@ -848,7 +897,7 @@ def run_inference_from_bytes(model_name: str, content: bytes):
     try:
         # Handle Keras models
         if isinstance(engine, tf.keras.Model):
-            if target == "master":
+            if target == MASTER_HISTO_ENGINE_KEY:
                 input_array = preprocess_master_histo_image(content)
                 predictions = engine.predict(input_array, verbose=0)
                 probs = to_probability_vector(predictions[0])
@@ -863,7 +912,12 @@ def run_inference_from_bytes(model_name: str, content: bytes):
                     "pathology_confidence": pathology_confidence,
                     "diagnosis": pathology_group,
                     "diagnosis_prediction": pathology_group,
-                    "insight": f"Master model predicted subclass {result_label} with {confidence:.1%} confidence and classified it as {pathology_group}"
+                    "insight": (
+                        f"{MASTER_HISTO_MODEL_DISPLAY_NAME} predicted subclass {result_label} "
+                        f"with {confidence:.1%} confidence and classified it as {pathology_group}"
+                    ),
+                    "model_name": MASTER_HISTO_MODEL_DISPLAY_NAME,
+                    "model_file": get_master_histo_model_filename(),
                 }
                 return response
             else:
@@ -1391,11 +1445,21 @@ def run_inference_from_bytes(model_name: str, content: bytes):
         raise HTTPException(status_code=500, detail=f"Inference Pipeline Error: {error_msg}")
 
 
+@app.post("/predict/histo/multi")
+@app.post("/predict/histo/master-model")
+async def run_master_histo_inference(file: UploadFile = File(...)):
+    """
+    Dedicated multi-class histopathology endpoint powered by the OncoScanAI master .h5 model.
+    """
+    content = await file.read()
+    return run_inference_from_bytes(MASTER_HISTO_ENGINE_KEY, content)
+
+
 @app.post("/predict/histo/{model_name}")
 async def run_inference(model_name: str, file: UploadFile = File(...)):
     """
-    Route used by both VisionWorkbench and HistoAnalysis.
-    Performs real inference using the local .pth files.
+     Route used by both VisionWorkbench and HistoAnalysis.
+    Performs real inference using the local model files.
     """
     content = await file.read()
     return run_inference_from_bytes(model_name, content)

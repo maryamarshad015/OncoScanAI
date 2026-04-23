@@ -19,9 +19,16 @@
       "type": "ultralytics",
       "active": true,
       "engine_key": "yolo"
+    },
+    "master": {
+      "file": "OncoScanAI_Master_Model.h5",
+      "type": "keras_multiclass_histology",
+      "num_classes": 8,
+      "active": true,
+      "engine_key": "master"
     }
   },
-  "last_loaded": "2026-04-21T02:47:43.186236",
+  "last_loaded": "2026-04-24T00:19:02.177775",
   "persistence": "enabled",
   "active_count": 6,
   "models_loaded": true
