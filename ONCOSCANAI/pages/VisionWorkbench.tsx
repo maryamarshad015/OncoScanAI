@@ -72,21 +72,9 @@ const PathologyReport: React.FC<{ file: UploadedFile; analysis: AnalysisResult }
     `Sections demonstrate tissue architecture and cellular morphology consistent with ${analysis.pathology} classification. ` +
     `Nuclear and stromal pattern inferred by ${analysis.modelUsed}. ${analysis.insight}`;
 
-  const impression =
-    getS('Impression') ||
-    `AI inference indicates ${analysis.pathology} morphology at ${confidence} confidence. Formal pathology correlation is required before any clinical decision.`;
-
   const nextStepsRaw =
     getS('Recommended Clinical Next Steps') ||
     '1. Arrange specialist oncology consultation. 2. Confirm findings with biopsy or formal histopathological review. 3. Correlate with mammography, MRI, or ultrasound as clinically appropriate. 4. Discuss in multidisciplinary tumor board when indicated. 5. Initiate management pathway based on confirmed subtype and grade.';
-
-  const management =
-    getS('Management Considerations') ||
-    'General management pathways may include surgical intervention, chemotherapy, radiation therapy, and hormone-directed therapy depending on confirmed subtype, grade, receptor status, and stage.';
-
-  const limitations =
-    getS('Limitations') ||
-    'This AI-derived inference depends on image quality, representative sampling, and model training data. Dataset bias and technical variability may affect performance. It is not a substitute for formal histopathological diagnosis.';
 
   const steps = splitSteps(nextStepsRaw);
 
@@ -195,28 +183,8 @@ const PathologyReport: React.FC<{ file: UploadedFile; analysis: AnalysisResult }
             content: <span className="leading-[1.9]">Histology image — single core biopsy or whole-slide scan submitted for AI single-class classification.</span>,
           },
           {
-            label: 'Gross',
-            content: <span className="leading-[1.9]">Received as a scanned histological image ({file.size}). Submitted for single-class inference using the {analysis.modelUsed} engine. Image processed at full resolution. Classification result: <strong>{analysis.pathology}</strong>.</span>,
-          },
-          {
             label: 'Microscopic',
             content: <span className="leading-[1.9]">{microscopic}</span>,
-          },
-          {
-            label: 'Impression',
-            content: <span className="leading-[1.9]">{impression}</span>,
-          },
-          {
-            label: 'Management Considerations',
-            content: <span className="leading-[1.9]">{management}</span>,
-          },
-          {
-            label: 'Limitations',
-            content: <span className="leading-[1.9]">{limitations}</span>,
-          },
-          {
-            label: 'Previous BX / AI History',
-            content: <span className="leading-[1.9]">No prior AI scan history available for this session.</span>,
           },
         ].map((section, i) => (
           <div key={i} className={`py-3 ${i > 0 ? 'border-t border-gray-100' : ''}`}>

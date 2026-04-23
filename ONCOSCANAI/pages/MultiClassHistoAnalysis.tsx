@@ -74,21 +74,9 @@ const MultiPathologyReport: React.FC<{ file: UploadedFile; prediction: HistoPred
     `Atypical cellular morphology with disturbed tissue architecture in keeping with ${fields.subclassLabel}; ` +
     `nuclear atypia and stromal-epithelial relationships are inferred by the OncoScanAI Master model and require pathologist confirmation.`;
 
-  const impression =
-    getS('Impression') ||
-    `Impression suggests ${fields.diagnosis} morphology with subclass confidence of ${subclassConf}; formal pathology correlation is required.`;
-
   const nextStepsRaw =
     getS('Recommended Clinical Next Steps') ||
     '1. Arrange specialist consultation with breast oncology or surgical oncology. 2. Recommend confirmatory pathological review to validate AI-based histological findings. 3. Correlate with mammography, MRI, or ultrasound as clinically appropriate. 4. Confirm subtype and grade on pathology review. 5. Discuss in a multidisciplinary tumor board setting when indicated.';
-
-  const management =
-    getS('Management Considerations') ||
-    'General management pathways may include surgical intervention, chemotherapy, radiation therapy, and when biologically appropriate, hormone-directed therapy depending on confirmed subtype, grade, receptor status, and stage.';
-
-  const limitations =
-    getS('Limitations') ||
-    'This AI-derived inference depends on image quality, representative sampling, and model training data. Dataset bias and technical variability may affect performance. It is not a substitute for formal histopathological diagnosis.';
 
   const steps = splitSteps(nextStepsRaw);
 
@@ -211,15 +199,7 @@ const MultiPathologyReport: React.FC<{ file: UploadedFile; prediction: HistoPred
         {[
           { label: 'Clinical History', content: <span className="leading-[1.9]">{clinicalHistory}</span> },
           { label: 'Sites', content: <span className="leading-[1.9]">Breast core biopsies — histopathology image submitted for AI multi-class subtype classification.</span> },
-          {
-            label: 'Gross',
-            content: <span className="leading-[1.9]">Scanned histological image ({file.size}). Submitted for multi-class inference using the OncoScanAI Master model. Predicted subclass: <strong>{fields.subclassLabel}</strong> (Class ID: {prediction.class_id ?? 'N/A'}). Diagnosis mapping: <strong>{fields.diagnosis}</strong>.</span>,
-          },
           { label: 'Microscopic', content: <span className="leading-[1.9]">{microscopic}</span> },
-          { label: 'Impression',  content: <span className="leading-[1.9]">{impression}</span> },
-          { label: 'Management Considerations', content: <span className="leading-[1.9]">{management}</span> },
-          { label: 'Limitations', content: <span className="leading-[1.9]">{limitations}</span> },
-          { label: 'Previous BX / AI History', content: <span className="leading-[1.9]">No prior AI scan history available for this session.</span> },
         ].map((section, i) => (
           <div key={i} className={`py-3 ${i > 0 ? 'border-t border-gray-100' : ''}`}>
             <span className="font-serif font-bold text-[12px] uppercase tracking-widest text-gray-700">{section.label}: </span>

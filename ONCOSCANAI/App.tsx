@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -15,10 +15,34 @@ import PatientData              from './pages/PatientData';
 import Reports                  from './pages/Reports';
 import Settings                 from './pages/Settings';
 
+const BackToHomeButton: React.FC = () => {
+  const location = useLocation();
+
+  if (location.pathname === '/') return null;
+
+  return (
+    <div className="border-b border-pink-100 bg-gradient-to-r from-pink-50 via-white to-rose-50">
+      <div className="mx-auto flex h-14 max-w-screen-2xl items-center px-4 md:px-6">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 rounded-full border border-brand-pink bg-brand-pink px-5 py-2 text-sm font-black text-white shadow-lg shadow-pink-200 transition-all hover:-translate-y-0.5 hover:bg-brand-pink-dark hover:shadow-xl hover:shadow-pink-200"
+          aria-label="Go back to home page"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          <span>Back to Home</span>
+        </Link>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   return (
     <AuthProvider>
       <HashRouter>
+        <BackToHomeButton />
         <Routes>
           {/* Public routes */}
           <Route path="/"       element={<LandingPage />} />

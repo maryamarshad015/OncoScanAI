@@ -30,12 +30,9 @@ const HISTOLOGY_HEADINGS = [
   "Subclass Confidence",
   "Diagnosis Confidence",
   "Summary",
-  "Impression",
   "Histopathological Features",
   "Risk Stratification",
   "Recommended Clinical Next Steps",
-  "Management Considerations",
-  "Limitations",
   "Disclaimer",
 ];
 
@@ -53,14 +50,16 @@ Rules:
 - Use only the provided findings.
 - Do not invent values.
 - Do not state a final diagnosis.
+- Do not describe microscopic features as definitively observed unless explicitly provided in the findings.
+- When referring to the predicted subclass or classification, use guidance-based language such as "features to assess include" or "the pathologist should evaluate for".
+- Do not assert the presence of histological structures, mitotic figures, stromal response, necrosis, or invasion unless explicitly stated in Model Insight.
+- If microscopic details are not explicitly available, clearly state that features are not specified and shift to expected features based on the predicted subclass.
+- Clearly separate AI prediction from pathological confirmation by using phrases such as "AI-predicted", "suggestive of", or "requires confirmation".
 - Return only these headings exactly and in this order, with each section as a concise paragraph:
 Summary:
-Impression:
 Histopathological Features:
 Risk Stratification:
 Recommended Clinical Next Steps:
-Management Considerations:
-Limitations:
 Disclaimer:
 
 Provided findings:
@@ -73,24 +72,18 @@ Diagnosis Confidence: ${typeof a.diagnosisConfidence === "number" ? `${(a.diagno
 Model Insight: ${a.insight ?? "Model identified subclass and diagnosis pattern for clinical review."}
 
 Writing guidance:
-- "Summary" should be a concise 1-2 sentence pathology-style paragraph using histomorphology language.
-- "Impression" should be concise, authoritative, and avoid repeating the Summary.
-- "Histopathological Features" must describe key microscopic features in one compact paragraph.
-- "Risk Stratification" must explicitly say Low Risk, Moderate Risk, or High Risk and briefly justify it.
-- "Recommended Clinical Next Steps" should be written as a short paragraph mentioning specialist consultation, confirmatory pathological review, imaging correlation, pathology confirmation, and multidisciplinary review in realistic workflow order.
-- "Management Considerations" should be a brief paragraph mentioning general pathways such as surgery, chemotherapy, radiation therapy, or hormone therapy when appropriate.
-- "Limitations" must mention AI limitations, image quality dependence, dataset bias, and that this is not a substitute for formal histopathological diagnosis.
-- "Disclaimer" must clearly state that the AI report is for reference only and not for standalone diagnostic use.
-- If a recognized subtype is implied, use commonly accepted histopathology terminology only.
+- "Summary" should be a concise 1-2 sentence paragraph referencing the AI prediction and overall pathological suspicion using cautious, non-definitive language.
+- "Histopathological Features" must not claim observed findings unless provided; instead, describe that features are not fully specified and guide the pathologist on what to evaluate based on the predicted subclass using medically accurate terminology.
+- "Histopathological Features" should explicitly use this wording pattern: "The section shows [whatever subclass predicted] and suggests the pathologist to watch for [all the signs the histopahtology microscopic analysis for that specifc subclass predicted can have in a microscopic study as according to medecine rule book.]"
+- "Risk Stratification" must explicitly state Low Risk, Moderate Risk, or High Risk based on the AI classification and confidence, with cautious justification and no definitive diagnosis.
+- "Recommended Clinical Next Steps" should be written as a short paragraph mentioning specialist consultation, confirmatory pathological review, imaging correlation, pathology confirmation, and multidisciplinary review in realistic workflow order, emphasizing verification.
+- "Disclaimer" must clearly state that the AI report is for reference only, is not based on complete histopathological confirmation, and must not be used for standalone diagnosis.
 
 Return exactly this structure:
 Summary: ...
-Impression: ...
 Histopathological Features: ...
 Risk Stratification: ...
 Recommended Clinical Next Steps: ...
-Management Considerations: ...
-Limitations: ...
 Disclaimer: ...
 `.trim();
   }
@@ -250,9 +243,6 @@ function buildHistologyFallback(body: ReportRequest, extractedText: string) {
     "Summary":
       extractedSections["Summary"] ||
       `Breast tissue demonstrates morphologic features compatible with ${subclass} in a ${diagnosis.toLowerCase()} context, with AI findings supporting further histopathologic review. ${insight}`,
-    "Impression":
-      extractedSections["Impression"] ||
-      `Impression suggests ${diagnosis.toLowerCase()} morphology with supporting AI confidence; formal pathology correlation is required.`,
     "Histopathological Features":
       extractedSections["Histopathological Features"] ||
       `${subtypeFeatures}; nuclear atypia and architectural distortion should be correlated with definitive microscopy; mitotic activity and stromal-epithelial relationships require pathologist confirmation.`,
@@ -265,12 +255,6 @@ function buildHistologyFallback(body: ReportRequest, extractedText: string) {
     "Recommended Clinical Next Steps":
       extractedSections["Recommended Clinical Next Steps"] ||
       `Recommend specialist consultation with breast oncology or surgical oncology, confirmatory pathological review to validate AI-based histological findings, imaging correlation, and multidisciplinary review to finalize histopathologic assessment and treatment planning.`,
-    "Management Considerations":
-      extractedSections["Management Considerations"] ||
-      `Consider general management pathways such as surgery, chemotherapy, radiation therapy, and hormone-directed therapy as clinically appropriate after pathology confirmation of subtype, grade, and receptor status.`,
-    "Limitations":
-      extractedSections["Limitations"] ||
-      `This AI-derived inference depends on image quality, representative sampling, and model training data. Dataset bias and technical variability may affect performance. It is not a substitute for formal histopathological diagnosis.`,
     "Disclaimer":
       extractedSections["Disclaimer"] ||
       "This draft is generated for preliminary review only. A qualified clinician must review, interpret, and confirm findings before forming a final diagnosis or treatment plan.",
@@ -311,12 +295,6 @@ function buildHistologyStructuredReport(body: ReportRequest, report: string) {
         ],
       },
       {
-        title: "Impression",
-        subsections: [
-          { label: "Impression", content: sections["Impression"] || "Impression generated from model output." },
-        ],
-      },
-      {
         title: "Histopathological Features",
         subsections: [
           { label: "Features", content: sections["Histopathological Features"] || "Histopathological feature summary generated from model output." },
@@ -338,18 +316,6 @@ function buildHistologyStructuredReport(body: ReportRequest, report: string) {
         title: "Recommended Clinical Next Steps",
         subsections: [
           { label: "Next Steps", content: sections["Recommended Clinical Next Steps"] || "Clinical next steps generated from available model output." },
-        ],
-      },
-      {
-        title: "Management Considerations",
-        subsections: [
-          { label: "Management", content: sections["Management Considerations"] || "Management considerations generated from available model output." },
-        ],
-      },
-      {
-        title: "Limitations",
-        subsections: [
-          { label: "Limitations", content: sections["Limitations"] || "Limitations generated from available model output." },
         ],
       },
       {
