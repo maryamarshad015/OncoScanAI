@@ -2,7 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import type { AnalysisResult, UploadedFile } from '../types';
 import { UploadIcon, ModelIcon, LiveIcon, VisionIcon, InfoIcon, DownloadIcon } from '../components/icons';
+import { useAuth } from '../context/AuthContext';
 import { downloadReportAsPDF } from '../utils/downloadPDF';
+import { createRecordId, fileToDataUrl, getPatientIdentity, upsertPatientRecord } from '../utils/patientRecords';
 // --- Helper Functions ---
 
 type ModelsResponse = {
@@ -95,6 +97,7 @@ const normalizeReportText = (report?: string) =>
 // --- Main Component ---
 
 const UploadScans: React.FC = () => {
+  const { currentUser } = useAuth();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -139,6 +142,31 @@ const UploadScans: React.FC = () => {
     setSelectedFile(prev => (prev && prev.id === fileId ? updater(prev) : prev));
   };
 
+  const persistUltrasoundRecord = async (file: UploadedFile) => {
+    const identity = getPatientIdentity(currentUser);
+    if (!identity || !file.recordId) return;
+
+    try {
+      await upsertPatientRecord({
+        ...identity,
+        clientRecordId: file.recordId,
+        fileName: file.name,
+        sourcePage: 'ultrasound-analysis',
+        modality: 'ultrasound',
+        studyTitle: file.analysis?.pathology ? `${file.analysis.pathology} Ultrasound Analysis` : 'Ultrasound Analysis',
+        studyType: 'Ultrasound',
+        status: file.status,
+        reportStatus: file.reportStatus,
+        previewImage: file.storagePreviewUrl,
+        analysis: file.analysis,
+        suggestiveReport: file.suggestiveReport,
+        structuredReport: file.structuredReport,
+      });
+    } catch (error) {
+      console.error('Could not save ultrasound record', error);
+    }
+  };
+
   const generateSuggestiveReport = async (fileObj: UploadedFile, analysis: AnalysisResult) => {
     updateUploadedFile(fileObj.id, file => ({
       ...file,
@@ -181,6 +209,12 @@ const UploadScans: React.FC = () => {
 
       const json   = await res.json() as WorkerReportResponse;
       const report = normalizeReportText(json.report) || localFallback;
+      const completedRecord: UploadedFile = {
+        ...fileObj,
+        reportStatus: 'Complete',
+        suggestiveReport: report,
+        reportError: undefined,
+      };
 
       updateUploadedFile(fileObj.id, file => ({
         ...file,
@@ -188,15 +222,23 @@ const UploadScans: React.FC = () => {
         suggestiveReport: report,
         reportError: undefined,
       }));
+      void persistUltrasoundRecord(completedRecord);
     } catch {
       clearTimeout(timeoutId);
       // Worker offline / timed out — use local fallback immediately
+      const completedRecord: UploadedFile = {
+        ...fileObj,
+        reportStatus: 'Complete',
+        suggestiveReport: localFallback,
+        reportError: undefined,
+      };
       updateUploadedFile(fileObj.id, file => ({
         ...file,
         reportStatus: 'Complete',
         suggestiveReport: localFallback,
         reportError: undefined,
       }));
+      void persistUltrasoundRecord(completedRecord);
     }
   };
 
@@ -247,11 +289,14 @@ const UploadScans: React.FC = () => {
 
       setFiles(cur => cur.map(f => f.id === fileObj.id ? completedFile : f));
       setSelectedFile(prev => (!prev || prev.id === fileObj.id ? completedFile : prev));
+      void persistUltrasoundRecord(completedFile);
       void generateSuggestiveReport(completedFile, analysis);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setFiles(cur => cur.map(f => f.id === fileObj.id ? ({ ...f, status: 'Failed', errorMessage: msg } as UploadedFile) : f));
-      setSelectedFile(prev => prev && prev.id === fileObj.id ? ({ ...fileObj, status: 'Failed', errorMessage: msg } as UploadedFile) : prev);
+      const failedFile = { ...fileObj, status: 'Failed', errorMessage: msg } as UploadedFile;
+      setFiles(cur => cur.map(f => f.id === fileObj.id ? failedFile : f));
+      setSelectedFile(prev => prev && prev.id === fileObj.id ? failedFile : prev);
+      void persistUltrasoundRecord(failedFile);
     }
   };
 
@@ -274,18 +319,33 @@ const UploadScans: React.FC = () => {
       return;
     }
 
+    const storedPreviewUrls = await Promise.all(
+      droppedFiles.map(async file => {
+        try {
+          return await fileToDataUrl(file);
+        } catch {
+          return undefined;
+        }
+      })
+    );
+
     const newUploads: UploadedFile[] = Array.from(droppedFiles).map((file, index) => ({
       id: String(Date.now() + index),
+      recordId: createRecordId('us'),
       name: file.name,
       size: formatBytes(file.size),
       status: 'Pending',
       type: (file.name.split('.').pop() as any) || 'png',
       previewUrl: URL.createObjectURL(file),
+      storagePreviewUrl: storedPreviewUrls[index],
       reportStatus: 'Idle',
     }));
 
     setFiles(prev => [...newUploads, ...prev]);
     if (newUploads.length > 0) setSelectedFile(newUploads[0]);
+    newUploads.forEach(upload => {
+      void persistUltrasoundRecord(upload);
+    });
 
     // Start inference for each uploaded file
     for (let i = 0; i < newUploads.length; i++) {

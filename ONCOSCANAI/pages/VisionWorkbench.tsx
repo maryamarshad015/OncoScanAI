@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UploadIcon, ModelIcon, VisionIcon, InfoIcon, DownloadIcon, PrintIcon } from '../components/icons';
 import type { UploadedFile, AnalysisResult, HistoPrediction, StructuredReport } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { downloadReportAsPDF } from '../utils/downloadPDF';
+import { createRecordId, fileToDataUrl, getPatientIdentity, upsertPatientRecord } from '../utils/patientRecords';
 
 const BACKEND_URL = 'http://127.0.0.1:8000';
 const REPORT_WORKER_URL = '/report';
@@ -223,6 +225,7 @@ const PathologyReport: React.FC<{ file: UploadedFile; analysis: AnalysisResult }
    Main page component
    ───────────────────────────────────────────────────────────── */
 const VisionWorkbench: React.FC = () => {
+  const { currentUser } = useAuth();
   const [files, setFiles]                 = useState<UploadedFile[]>([]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -254,17 +257,42 @@ const VisionWorkbench: React.FC = () => {
   const updateFile = (id: string, fn: (f: UploadedFile) => UploadedFile) =>
     setFiles(prev => prev.map(f => f.id === id ? fn(f) : f));
 
+  const persistVisionRecord = async (file: UploadedFile) => {
+    const identity = getPatientIdentity(currentUser);
+    if (!identity || !file.recordId) return;
+
+    try {
+      await upsertPatientRecord({
+        ...identity,
+        clientRecordId: file.recordId,
+        fileName: file.name,
+        sourcePage: 'vision-workbench',
+        modality: 'histopathology',
+        studyTitle: file.analysis?.pathology ? `${file.analysis.pathology} Histology Analysis` : 'Histology Analysis',
+        studyType: 'Single-Class Histology',
+        status: file.status,
+        reportStatus: file.reportStatus,
+        previewImage: file.storagePreviewUrl,
+        analysis: file.analysis,
+        structuredReport: file.structuredReport,
+      });
+    } catch (error) {
+      console.error('Could not save histology record', error);
+    }
+  };
+
   /* Fetch NLP enrichment from worker (optional — enhances text only) */
-  const fetchNLPEnrichment = async (fileId: string, fileName: string, analysis: AnalysisResult) => {
+  const fetchNLPEnrichment = async (file: UploadedFile, analysis: AnalysisResult) => {
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 5000);
+    let structuredReport: StructuredReport | undefined;
     try {
       const res = await fetch(REPORT_WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          fileName,
+          fileName: file.name,
           analysis: {
             modality: 'histopathology',
             pathology: analysis.pathology,
@@ -281,7 +309,6 @@ const VisionWorkbench: React.FC = () => {
       type WR = { report?: string; sections?: unknown[]; patientInfo?: Record<string, string> };
       const json = await res.json() as WR;
 
-      let structuredReport: StructuredReport | null = null;
       if (json.sections && Array.isArray(json.sections)) {
         structuredReport = { patientInfo: json.patientInfo, sections: json.sections as StructuredReport['sections'] };
       } else if (json.report) {
@@ -294,17 +321,23 @@ const VisionWorkbench: React.FC = () => {
         } catch { /* ignore */ }
       }
       if (structuredReport)
-        updateFile(fileId, f => ({ ...f, structuredReport, reportStatus: 'Complete' }));
+        updateFile(file.id, f => ({ ...f, structuredReport, reportStatus: 'Complete' }));
     } catch {
       clearTimeout(timeoutId);
       /* worker offline / timed out — report still renders from inference data */
     }
-    updateFile(fileId, f => f.reportStatus === 'Generating' ? { ...f, reportStatus: 'Complete' } : f);
+    updateFile(file.id, f => f.reportStatus === 'Generating' ? { ...f, reportStatus: 'Complete' } : f);
+    void persistVisionRecord({
+      ...file,
+      analysis,
+      structuredReport: structuredReport || file.structuredReport,
+      reportStatus: 'Complete',
+    });
   };
 
-  const handleAnalysis = async (fileId: string, rawFile: File, modelName: string) => {
+  const handleAnalysis = async (fileMeta: UploadedFile, rawFile: File, modelName: string) => {
     if (!modelName) return;
-    updateFile(fileId, f => ({ ...f, status: 'Analyzing' }));
+    updateFile(fileMeta.id, f => ({ ...f, status: 'Analyzing' }));
 
     const formData = new FormData();
     formData.append('file', rawFile);
@@ -322,12 +355,25 @@ const VisionWorkbench: React.FC = () => {
       };
 
       // Immediately mark as Complete so the report renders right away
-      updateFile(fileId, f => ({ ...f, status: 'Complete', analysis, reportStatus: 'Generating' }));
+      const completedFile: UploadedFile = {
+        ...fileMeta,
+        status: 'Complete',
+        analysis,
+        reportStatus: 'Generating',
+      };
+      updateFile(fileMeta.id, f => ({ ...f, status: 'Complete', analysis, reportStatus: 'Generating' }));
+      void persistVisionRecord(completedFile);
 
       // Kick off NLP enrichment in background — does not block render
-      await fetchNLPEnrichment(fileId, rawFile.name, analysis);
+      await fetchNLPEnrichment(completedFile, analysis);
     } catch (err) {
-      updateFile(fileId, f => ({ ...f, status: 'Failed', errorMessage: String(err) }));
+      const failedFile: UploadedFile = {
+        ...fileMeta,
+        status: 'Failed',
+        errorMessage: String(err),
+      };
+      updateFile(fileMeta.id, () => failedFile);
+      void persistVisionRecord(failedFile);
     }
   };
 
@@ -336,19 +382,36 @@ const VisionWorkbench: React.FC = () => {
     if ('dataTransfer' in e) { e.preventDefault(); rawFiles = Array.from(e.dataTransfer.files); }
     else rawFiles = e.target.files ? Array.from(e.target.files) : [];
 
-    const newFiles: UploadedFile[] = rawFiles.map(rf => ({
-      id: Math.random().toString(36).substr(2, 9),
-      name: rf.name,
-      size: (rf.size / 1024).toFixed(1) + ' KB',
-      status: 'Pending',
-      type: rf.name.split('.').pop() || 'unknown',
-      previewUrl: URL.createObjectURL(rf),
-      reportStatus: 'Idle',
-    }));
+    void (async () => {
+      const storedPreviewUrls = await Promise.all(
+        rawFiles.map(async file => {
+          try {
+            return await fileToDataUrl(file);
+          } catch {
+            return undefined;
+          }
+        })
+      );
 
-    setFiles(prev => [...newFiles, ...prev]);
-    if (newFiles.length > 0) setSelectedFileId(newFiles[0].id);
-    newFiles.forEach((nf, i) => handleAnalysis(nf.id, rawFiles[i], activeModel));
+      const newFiles: UploadedFile[] = rawFiles.map((rf, index) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        recordId: createRecordId('vh'),
+        name: rf.name,
+        size: (rf.size / 1024).toFixed(1) + ' KB',
+        status: 'Pending',
+        type: rf.name.split('.').pop() || 'unknown',
+        previewUrl: URL.createObjectURL(rf),
+        storagePreviewUrl: storedPreviewUrls[index],
+        reportStatus: 'Idle',
+      }));
+
+      setFiles(prev => [...newFiles, ...prev]);
+      if (newFiles.length > 0) setSelectedFileId(newFiles[0].id);
+      newFiles.forEach(file => {
+        void persistVisionRecord(file);
+      });
+      newFiles.forEach((nf, i) => handleAnalysis(nf, rawFiles[i], activeModel));
+    })();
   };
 
   return (
@@ -511,7 +574,7 @@ const VisionWorkbench: React.FC = () => {
                     <span className="text-[9px] font-bold text-brand-pink animate-pulse uppercase tracking-widest">Generating…</span>
                   )}
                   <button
-                    onClick={() => selectedFile.analysis && fetchNLPEnrichment(selectedFile.id, selectedFile.name, selectedFile.analysis)}
+                    onClick={() => selectedFile.analysis && fetchNLPEnrichment(selectedFile, selectedFile.analysis)}
                     disabled={selectedFile.reportStatus === 'Generating'}
                     className="px-3 py-1.5 bg-brand-pink text-white text-[9px] font-black uppercase tracking-widest rounded-lg hover:bg-brand-pink-dark disabled:opacity-50 transition-all">
                     Regenerate
@@ -534,7 +597,7 @@ const VisionWorkbench: React.FC = () => {
             </div>
             <h3 className="text-lg font-black text-slate-800 mb-2">Analysis Failed</h3>
             <p className="text-slate-500 text-sm max-w-xs mb-6">{selectedFile.errorMessage}</p>
-            <button onClick={() => handleAnalysis(selectedFile.id, new File([], selectedFile.name), activeModel)}
+            <button onClick={() => handleAnalysis(selectedFile, new File([], selectedFile.name), activeModel)}
               className="px-6 py-2.5 border-2 border-slate-200 rounded-xl text-xs font-black uppercase tracking-widest hover:border-brand-pink hover:text-brand-pink transition-all">
               Retry Inference
             </button>

@@ -44,13 +44,37 @@ export interface StructuredReport {
   sections: ReportSection[];
 }
 
+export interface PatientRecord {
+  id: number;
+  clientRecordId: string;
+  userId: string;
+  userEmail?: string;
+  userDisplayName?: string;
+  fileName: string;
+  sourcePage: string;
+  modality: string;
+  studyTitle: string;
+  studyType: string;
+  status: UploadedFile['status'];
+  reportStatus?: UploadedFile['reportStatus'];
+  previewImage?: string;
+  analysis?: AnalysisResult;
+  prediction?: HistoPrediction;
+  suggestiveReport?: string;
+  structuredReport?: StructuredReport;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UploadedFile {
   id: string;
+  recordId?: string;
   name: string;
   size: string;
   status: 'Pending' | 'Uploading' | 'Analyzing' | 'Complete' | 'Failed';
   type: string;
   previewUrl?: string;
+  storagePreviewUrl?: string;
   analysis?: AnalysisResult;
   errorMessage?: string;
   // Progress tracker for async operations used in HistoAnalysis

@@ -1,6 +1,7 @@
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -12,8 +13,9 @@ import numpy as np
 import os
 import json
 import io
+import sqlite3
 import tempfile
-from typing import Dict
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from utils import preprocess_medical_image
 
@@ -452,10 +454,112 @@ engines: Dict[str, any] = {}
 BASE_DIR = os.path.dirname(__file__)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 CONFIG_FILE = os.path.join(BASE_DIR, ".modelconfig")
+RECORDS_DB_FILE = os.path.join(BASE_DIR, "oncoscan_records.db")
 
 print(f"[INIT] Using MODELS_DIR: {MODELS_DIR}")
 print(f"[INIT] Using CONFIG_FILE: {CONFIG_FILE}")
 print(f"[INIT] Workspace root: {BASE_DIR}")
+
+
+class PatientRecordUpsert(BaseModel):
+    user_id: str
+    user_email: Optional[str] = None
+    user_display_name: Optional[str] = None
+    client_record_id: str
+    file_name: str
+    source_page: str
+    modality: str
+    study_title: str
+    study_type: str
+    status: str
+    report_status: Optional[str] = None
+    preview_image: Optional[str] = None
+    analysis: Optional[Dict[str, Any]] = None
+    prediction: Optional[Dict[str, Any]] = None
+    suggestive_report: Optional[str] = None
+    structured_report: Optional[Dict[str, Any]] = None
+
+
+def get_records_connection():
+    connection = sqlite3.connect(RECORDS_DB_FILE)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_records_db():
+    with get_records_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patient_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                user_email TEXT,
+                user_display_name TEXT,
+                client_record_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                source_page TEXT NOT NULL,
+                modality TEXT NOT NULL,
+                study_title TEXT NOT NULL,
+                study_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                report_status TEXT,
+                preview_image TEXT,
+                analysis_json TEXT,
+                prediction_json TEXT,
+                suggestive_report TEXT,
+                structured_report_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, client_record_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_patient_records_user_created
+            ON patient_records (user_id, created_at DESC)
+            """
+        )
+        connection.commit()
+
+
+def to_json_text(value):
+    if value is None:
+        return None
+    return json.dumps(value)
+
+
+def from_json_text(value):
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
+
+
+def serialize_record(row):
+    return {
+        "id": row["id"],
+        "clientRecordId": row["client_record_id"],
+        "userId": row["user_id"],
+        "userEmail": row["user_email"],
+        "userDisplayName": row["user_display_name"],
+        "fileName": row["file_name"],
+        "sourcePage": row["source_page"],
+        "modality": row["modality"],
+        "studyTitle": row["study_title"],
+        "studyType": row["study_type"],
+        "status": row["status"],
+        "reportStatus": row["report_status"],
+        "previewImage": row["preview_image"],
+        "analysis": from_json_text(row["analysis_json"]),
+        "prediction": from_json_text(row["prediction_json"]),
+        "suggestiveReport": row["suggestive_report"],
+        "structuredReport": from_json_text(row["structured_report_json"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
 
 def load_clinical_models():
     """
@@ -783,6 +887,7 @@ def get_ultrasound_model_keys():
 async def startup_event():
     global engines
     try:
+        init_records_db()
         print(f"\n{'='*60}")
         print(f"[STARTUP] OncoDetect Pro Neural Engine")
         print(f"[STARTUP] Time: {datetime.now().isoformat()}")
@@ -831,6 +936,124 @@ async def get_active_models():
         "histo_models": get_histo_model_keys(),
         "ultrasound_models": get_ultrasound_model_keys(),
     }
+
+
+@app.get("/records/{user_id}")
+async def list_patient_records(user_id: str, user_email: Optional[str] = None):
+    init_records_db()
+    with get_records_connection() as connection:
+        if user_email:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM patient_records
+                WHERE user_id = ? OR user_email = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (user_id, user_email),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM patient_records
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+    return [serialize_record(row) for row in rows]
+
+
+@app.post("/records/upsert")
+async def upsert_patient_record(payload: PatientRecordUpsert):
+    init_records_db()
+    now = datetime.utcnow().isoformat()
+    with get_records_connection() as connection:
+        existing = connection.execute(
+            """
+            SELECT created_at
+            FROM patient_records
+            WHERE user_id = ? AND client_record_id = ?
+            """,
+            (payload.user_id, payload.client_record_id),
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now
+
+        connection.execute(
+            """
+            INSERT INTO patient_records (
+                user_id,
+                user_email,
+                user_display_name,
+                client_record_id,
+                file_name,
+                source_page,
+                modality,
+                study_title,
+                study_type,
+                status,
+                report_status,
+                preview_image,
+                analysis_json,
+                prediction_json,
+                suggestive_report,
+                structured_report_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, client_record_id) DO UPDATE SET
+                user_email = excluded.user_email,
+                user_display_name = excluded.user_display_name,
+                file_name = excluded.file_name,
+                source_page = excluded.source_page,
+                modality = excluded.modality,
+                study_title = excluded.study_title,
+                study_type = excluded.study_type,
+                status = excluded.status,
+                report_status = excluded.report_status,
+                preview_image = excluded.preview_image,
+                analysis_json = excluded.analysis_json,
+                prediction_json = excluded.prediction_json,
+                suggestive_report = excluded.suggestive_report,
+                structured_report_json = excluded.structured_report_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                payload.user_id,
+                payload.user_email,
+                payload.user_display_name,
+                payload.client_record_id,
+                payload.file_name,
+                payload.source_page,
+                payload.modality,
+                payload.study_title,
+                payload.study_type,
+                payload.status,
+                payload.report_status,
+                payload.preview_image,
+                to_json_text(payload.analysis),
+                to_json_text(payload.prediction),
+                payload.suggestive_report,
+                to_json_text(payload.structured_report),
+                created_at,
+                now,
+            ),
+        )
+        connection.commit()
+        row = connection.execute(
+            """
+            SELECT *
+            FROM patient_records
+            WHERE user_id = ? AND client_record_id = ?
+            """,
+            (payload.user_id, payload.client_record_id),
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=500, detail="Record could not be saved")
+
+    return serialize_record(row)
 
 def run_inference_from_bytes(model_name: str, content: bytes):
     """Shared inference routine for API endpoints that already have the upload bytes."""

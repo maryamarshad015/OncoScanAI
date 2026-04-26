@@ -1,7 +1,9 @@
 import React, { useState, useRef } from 'react';
 import type { HistoPrediction, UploadedFile, StructuredReport } from '../types';
 import { UploadIcon, InfoIcon, VisionIcon, LiveIcon, ModelIcon, DownloadIcon } from '../components/icons';
+import { useAuth } from '../context/AuthContext';
 import { downloadReportAsPDF } from '../utils/downloadPDF';
+import { createRecordId, fileToDataUrl, getPatientIdentity, upsertPatientRecord } from '../utils/patientRecords';
 
 type WorkerReportResponse = { report?: string; patientInfo?: Record<string, string>; sections?: unknown[] };
 type ErrorResponse = { detail?: string };
@@ -236,6 +238,7 @@ const MultiPathologyReport: React.FC<{ file: UploadedFile; prediction: HistoPred
    Main page component
    ───────────────────────────────────────────────────────── */
 const MultiClassHistoAnalysis: React.FC = () => {
+  const { currentUser } = useAuth();
   const [files, setFiles]           = useState<UploadedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -245,11 +248,38 @@ const MultiClassHistoAnalysis: React.FC = () => {
     setSelectedFile(prev => prev?.id === id ? fn(prev) : prev);
   };
 
+  const persistMultiClassRecord = async (file: UploadedFile) => {
+    const identity = getPatientIdentity(currentUser);
+    if (!identity || !file.recordId) return;
+
+    const fields = getPredictionFields(file.prediction);
+
+    try {
+      await upsertPatientRecord({
+        ...identity,
+        clientRecordId: file.recordId,
+        fileName: file.name,
+        sourcePage: 'multi-class-histo',
+        modality: 'histopathology',
+        studyTitle: `${fields.subclassLabel} Histology Report`,
+        studyType: 'Multi-Class Histology',
+        status: file.status,
+        reportStatus: file.reportStatus,
+        previewImage: file.storagePreviewUrl,
+        prediction: file.prediction,
+        structuredReport: file.structuredReport,
+      });
+    } catch (error) {
+      console.error('Could not save multi-class histology record', error);
+    }
+  };
+
   /* NLP enrichment via Cloudflare Worker */
   const enrichReport = async (fileObj: UploadedFile, prediction: HistoPrediction) => {
     const fields = getPredictionFields(prediction);
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 5000);
+    let structuredReport: StructuredReport | null = null;
     try {
       const res = await fetch(REPORT_WORKER_URL, {
         method: 'POST',
@@ -273,7 +303,6 @@ const MultiClassHistoAnalysis: React.FC = () => {
       if (!res.ok) return;
 
       const json = await res.json() as WorkerReportResponse;
-      let structuredReport: StructuredReport | null = null;
 
       if (json.sections && Array.isArray(json.sections)) {
         structuredReport = { patientInfo: json.patientInfo, sections: json.sections as StructuredReport['sections'] };
@@ -294,22 +323,42 @@ const MultiClassHistoAnalysis: React.FC = () => {
       /* worker offline / timed out — report renders from inference data */
     }
     updateFile(fileObj.id, f => f.reportStatus === 'Generating' ? { ...f, reportStatus: 'Complete' } : f);
+    void persistMultiClassRecord({
+      ...fileObj,
+      structuredReport: structuredReport || fileObj.structuredReport,
+      reportStatus: 'Complete',
+    });
   };
 
   const handleFiles = async (newFiles: File[]) => {
+    const storedPreviewUrls = await Promise.all(
+      newFiles.map(async file => {
+        try {
+          return await fileToDataUrl(file);
+        } catch {
+          return undefined;
+        }
+      })
+    );
+
     const uploads: UploadedFile[] = newFiles.map((file, i) => ({
       id: String(Date.now() + i),
+      recordId: createRecordId('mh'),
       name: file.name,
       size: (file.size / 1024).toFixed(1) + ' KB',
       status: 'Uploading',
       type: (file.name.split('.').pop()?.toLowerCase() ?? 'unknown'),
       progress: 0,
       previewUrl: URL.createObjectURL(file),
+      storagePreviewUrl: storedPreviewUrls[i],
       reportStatus: 'Idle',
     }));
 
     setFiles(prev => [...uploads, ...prev]);
     if (uploads.length > 0) setSelectedFile(uploads[0]);
+    uploads.forEach(upload => {
+      void persistMultiClassRecord(upload);
+    });
 
     for (const upload of uploads) {
       const rawFile = newFiles.find(f => f.name === upload.name);
@@ -337,13 +386,21 @@ const MultiClassHistoAnalysis: React.FC = () => {
           reportStatus: 'Generating',
         };
         updateFile(upload.id, () => completed);
+        void persistMultiClassRecord(completed);
 
         // Kick off NLP enrichment in background
         enrichReport(completed, result);
 
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Neural link failure.';
-        updateFile(upload.id, f => ({ ...f, status: 'Failed', progress: 100, errorMessage: msg }));
+        const failedFile: UploadedFile = {
+          ...upload,
+          status: 'Failed',
+          progress: 100,
+          errorMessage: msg,
+        };
+        updateFile(upload.id, () => failedFile);
+        void persistMultiClassRecord(failedFile);
       }
     }
   };
