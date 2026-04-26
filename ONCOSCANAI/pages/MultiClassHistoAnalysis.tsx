@@ -6,10 +6,7 @@ import { downloadReportAsPDF } from '../utils/downloadPDF';
 type WorkerReportResponse = { report?: string; patientInfo?: Record<string, string>; sections?: unknown[] };
 type ErrorResponse = { detail?: string };
 
-const MULTI_HISTO_PREDICT_URL = '/predict/histo/multi';
 const REPORT_WORKER_URL = '/report';
-const MASTER_MODEL_NAME = 'OncoScanAI Master Model';
-const MASTER_MODEL_FILE = 'OncoScanAI_Master_Model.h5';
 
 /* ── helpers ── */
 const getPredictionFields = (p?: HistoPrediction) => {
@@ -268,7 +265,7 @@ const MultiClassHistoAnalysis: React.FC = () => {
             classId: prediction.class_id,
             diagnosisConfidence: prediction.pathology_confidence,
             insight: prediction.insight,
-            modelUsed: `${MASTER_MODEL_NAME} (${MASTER_MODEL_FILE})`,
+            modelUsed: 'OncoScanAI Master',
           },
         }),
       });
@@ -322,7 +319,7 @@ const MultiClassHistoAnalysis: React.FC = () => {
       formData.append('file', rawFile);
 
       try {
-        const response = await fetch(MULTI_HISTO_PREDICT_URL, { method: 'POST', body: formData });
+        const response = await fetch('/predict/histo/master', { method: 'POST', body: formData });
 
         if (!response.ok) {
           const err = await response.json().catch((): ErrorResponse => ({ detail: `Inference failed: ${response.statusText}` })) as ErrorResponse;
